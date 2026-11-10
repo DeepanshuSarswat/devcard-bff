@@ -13,7 +13,10 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/deepanshusarswat/devcard-bff/internal/cache"
 	"github.com/deepanshusarswat/devcard-bff/internal/config"
+	"github.com/deepanshusarswat/devcard-bff/internal/devcard"
+	"github.com/deepanshusarswat/devcard-bff/internal/github"
 	"github.com/deepanshusarswat/devcard-bff/internal/health"
 )
 
@@ -40,9 +43,23 @@ func run() error {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: cfg.LogLevel}))
 	slog.SetDefault(logger)
 
+	ghOpts := []github.Option{github.WithBaseURL(cfg.GitHubBaseURL)}
+	if cfg.GitHubToken != "" {
+		ghOpts = append(ghOpts, github.WithToken(cfg.GitHubToken))
+	} else {
+		logger.Warn("GITHUB_TOKEN not set: limited to 60 unauthenticated GitHub requests per hour")
+	}
+	ghClient := github.NewClient(ghOpts...)
+
+	cards := cache.New[string, devcard.Card](cfg.CacheTTL, cache.WithMaxEntries(10_000))
+	go cards.RunJanitor(ctx, time.Minute) // stops when ctx is cancelled at shutdown
+
+	svc := devcard.NewService(ghClient, cards, cfg.UpstreamTimeout)
+
 	checker := health.New()
 	mux := http.NewServeMux()
 	checker.Register(mux)
+	devcard.NewHandler(svc, logger).Register(mux)
 
 	srv := &http.Server{
 		Addr:    net.JoinHostPort("", cfg.Port),
