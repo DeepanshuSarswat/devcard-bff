@@ -1,0 +1,30 @@
+version: "2"
+
+linters:
+  # "standard" = errcheck, govet, ineffassign, staticcheck, unused
+  default: standard
+  enable:
+    - bodyclose    # every http.Response.Body is closed
+    - errorlint    # errors compared with errors.Is/As, wrapped with %w
+    - misspell
+    - noctx        # outbound HTTP requests carry a context
+    - nilerr       # no "return nil" right after checking err != nil
+    - unconvert
+    - usestdlibvars
+  exclusions:
+    presets:
+      - std-error-handling
+    rules:
+      # In tests: writes to httptest recorders can't meaningfully fail, and
+      # httptest.NewRequest already carries a background context.
+      - path: _test\.go
+        linters: [errcheck, noctx]
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/deepanshusarswat/devcard-bff
