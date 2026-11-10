@@ -18,6 +18,7 @@ import (
 	"github.com/deepanshusarswat/devcard-bff/internal/devcard"
 	"github.com/deepanshusarswat/devcard-bff/internal/github"
 	"github.com/deepanshusarswat/devcard-bff/internal/health"
+	"github.com/deepanshusarswat/devcard-bff/internal/middleware"
 )
 
 func main() {
@@ -40,7 +41,10 @@ func run() error {
 		return fmt.Errorf("load config: %w", err)
 	}
 
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: cfg.LogLevel}))
+	// ContextHandler stamps request_id onto every log line written with a request context.
+	logger := slog.New(middleware.ContextHandler{
+		Handler: slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: cfg.LogLevel}),
+	})
 	slog.SetDefault(logger)
 
 	ghOpts := []github.Option{github.WithBaseURL(cfg.GitHubBaseURL)}
@@ -61,9 +65,18 @@ func run() error {
 	checker.Register(mux)
 	devcard.NewHandler(svc, logger).Register(mux)
 
+	// Outermost first: every request gets an ID, then is logged, then is
+	// protected from panics; CORS sits next to the router to answer preflights.
+	handler := middleware.Chain(mux,
+		middleware.RequestID,
+		middleware.Logger(logger),
+		middleware.Recover(logger),
+		middleware.CORS(cfg.AllowedOrigin),
+	)
+
 	srv := &http.Server{
 		Addr:    net.JoinHostPort("", cfg.Port),
-		Handler: mux,
+		Handler: handler,
 		// Never run a production server without timeouts: the zero values mean
 		// "wait forever", which lets slow clients exhaust connections.
 		ReadHeaderTimeout: 5 * time.Second,
